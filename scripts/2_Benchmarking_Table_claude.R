@@ -85,6 +85,22 @@ make_bench_ft <- function(bench_table, prefix_ge = FALSE) {
       part  = "header", j = "spearman",
       value = as_paragraph("Spearman ", as_i("ρ"), "\n(α)")
     ) %>%
+    flextable::compose(
+      part  = "header", j = "est",
+      value = as_paragraph("CCC\n(α)")
+    ) %>%
+    flextable::compose(
+      part  = "header", j = "bc",
+      value = as_paragraph("Bray-Curtis Dist ± SD\n(β)")
+    ) %>%
+    flextable::compose(
+      part  = "header", j = "recall",
+      value = as_paragraph("% Target\n(γ)")
+    ) %>%
+    flextable::compose(
+      part  = "header", j = "f1",
+      value = as_paragraph("F1-score\n(γ)")
+    ) %>%
     bold(part = "header") %>%
     bg(part = "header", bg = "#2C3E50") %>%
     color(part = "header", color = "white") %>%
@@ -205,6 +221,22 @@ make_combined_ft <- function(bench_unfilt, bench_0001pct, bench_001pct, ranks = 
     flextable::compose(
       part  = "header", j = "spearman",
       value = as_paragraph("Spearman ", as_i("ρ"), "\n(α)")
+    ) %>%
+    flextable::compose(
+      part  = "header", j = "est",
+      value = as_paragraph("CCC\n(α)")
+    ) %>%
+    flextable::compose(
+      part  = "header", j = "bc",
+      value = if (ranks) as_paragraph("BC Dist\n(β)") else as_paragraph("BC Dist ± SD\n(β)")
+    ) %>%
+    flextable::compose(
+      part  = "header", j = "recall",
+      value = as_paragraph("% Target\n(γ)")
+    ) %>%
+    flextable::compose(
+      part  = "header", j = "f1",
+      value = as_paragraph("F1-score\n(γ)")
     ) %>%
     merge_v(j = "Filter") %>%
     bold(part = "header") %>%
@@ -359,10 +391,22 @@ make_illumina_ranks_ft <- function(bench_unfilt, bench_0001pct, bench_001pct) {
     set_header_labels(
       Filter       = "Filter\nStrategy",
       Software     = "Software",
-      alpha_rank   = "α:\nmean rank",
-      beta_rank    = "β:\nmean rank",
-      gamma_rank   = "γ:\nmean rank",
+      alpha_rank   = "a:\nmean rank",
+      beta_rank    = "b:\nmean rank",
+      gamma_rank   = "g:\nmean rank",
       overall_rank = "Overall\nRank"
+    ) %>%
+    flextable::compose(
+      part = "header", j = "alpha_rank",
+      value = as_paragraph("α:\nmean rank")
+    ) %>%
+    flextable::compose(
+      part = "header", j = "beta_rank",
+      value = as_paragraph("β:\nmean rank")
+    ) %>%
+    flextable::compose(
+      part = "header", j = "gamma_rank",
+      value = as_paragraph("γ:\nmean rank")
     ) %>%
     merge_v(j = "Filter") %>%
     bold(part = "header") %>%
