@@ -1,0 +1,12 @@
+OUTDIR="/Users/kenthompson/Library/CloudStorage/OneDrive-UniversityofGuelph/CBG Innovation Unit - Metabarcode_Abundance/data/CAOS_data/json"
+
+mkdir -p "$OUTDIR"
+
+while IFS= read -r url; do
+    # Extract the last part after processids= to name the file
+    ids=$(echo "$url" | sed 's/.*processids=//')
+    outfile="$OUTDIR/${ids}.json"
+
+    echo "Downloading: $outfile"
+    curl -s "$url" -o "$outfile"
+done < urls.txt
