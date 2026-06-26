@@ -33,12 +33,12 @@ PHAUS_BOLD_Clean_NTS <- read_excel('data/BOLD_BCDM/PHAUS_parent_nts_BCDM_2.xlsx'
 
 PHAUS_BOLD_BINs <- unique(PHAUS_BOLD_Clean_NTS$bin_uri)
 
-PHAUS_MBC_ONT_MAP <- read_tsv('data/MAP_output/PHAUS_ONT.MAP2026_03_24/2-TSV Versions of Results/Metabarcoding_Results_PHAUS_COI-5P_658_BySample.tsv') %>%
+PHAUS_MBC_ONT_MAP <- read_tsv('data/MAP_output/PHAUS_ONT.MAP2026_06_17/Metabarcoding_Results_PHAUS_COI-5P_658_BySample.tsv') %>%
   rename(fieldid = Sample, bin_uri = BIN_Hit) %>%
   filter(fieldid %in% collections_sample_data$Lot_fieldID) %>%
   rename_with(tolower, Kingdom:Species) %>%
   rename(tot_reads = Reads, replicates = Replicates) %>%
-  select(fieldid, tot_reads, ASV_ID, replicates, kingdom:bin_uri) %>%
+  select(fieldid, tot_reads, OTU_ID, replicates, kingdom:bin_uri) %>%
   drop_na(bin_uri) %>%
   taxon_filter()
 # 
@@ -56,7 +56,7 @@ PHAUS_MBC_ONT_MAP <- read_tsv('data/MAP_output/PHAUS_ONT.MAP2026_03_24/2-TSV Ver
 #   select(fieldid, tot_reads, OTU_ID, replicates, kingdom:bin_uri) %>%
 #   taxon_filter()
 
-PHAUS_MBC_ILL_MAP <- read_tsv('data/MAP_output/PHAUS_ILL.MAP2026-06-02/Metabarcoding_Results_PHAUS_COI-5P_418_BySample 3.tsv') %>%
+PHAUS_MBC_ILL_MAP <- read_tsv('data/MAP_output/PHAUS_ILL.MAP2026-06-11/Metabarcoding_Results_PHAUS_COI-5P_418_BySample 4.tsv') %>%
   # filter(`%ID_match_to_BIN` > 97.6) %>%
   filter(Number_N <= 4) %>%
   filter(between(Seq_Length, 409, 424)) %>%
@@ -119,6 +119,75 @@ PHAUS_ILL_mBRAVE <- read_tsv('data/benchmarking/mBRAVE/All_Sets_of_Data_Illumina
   group_by(fieldid, phylum, class, order, family, genus, species, bin_uri) %>%
   summarise(tot_reads = sum(sequences), replicates = length(unique(rep)), .groups = "drop") %>%
   mutate(method = "mBRAVE_ILL") %>%
+  taxon_filter()
+
+# UMI combination → sample name lookup from sequencing parameters (sheet 2)
+mw_umi_lookup <- read_excel('data/parameters_illumina_PHAUS_2.5.xlsx', sheet = 2,
+                            skip = 7, col_names = FALSE) %>%
+  slice(-1) %>%
+  select(Sample = `...3`, FwdUMI = `...6`, RevUMI = `...7`) %>%
+  filter(!is.na(Sample)) %>%
+  mutate(
+    umi_key = paste0(FwdUMI, "_", RevUMI),
+    fieldid  = sub("_Rep\\d+$", "", Sample)
+  ) %>%
+  select(umi_key, fieldid)
+
+# MetaWorks (Illumina ESV-level; BIN matching via VSEARCH below)
+PHAUS_MBC_ILL_MetaWorks <- read_csv('data/benchmarking/MetaWorks/results_OTU_2026_06-26.csv',
+                                    show_col_types = FALSE) %>%
+  select(COI_GlobalESV, SampleName, ESVsize, ESVseq) %>%
+  mutate(umi_key = sub("_\\d+$", "", SampleName)) %>%
+  left_join(mw_umi_lookup, by = "umi_key") %>%
+  filter(!is.na(fieldid)) %>%
+  mutate(fieldid = str_replace_all(fieldid, "-", "#")) %>%
+  filter(fieldid %in% collections_sample_data$Lot_fieldID) %>%
+  group_by(fieldid, COI_GlobalESV, ESVseq) %>%
+  summarise(tot_reads = sum(ESVsize), replicates = n_distinct(umi_key), .groups = "drop")
+
+# ── MetaWorks BIN matching via VSEARCH ───────────────────────────────────────
+BOLDistilled_vsearch_db <- '/Users/kenthompson/Library/CloudStorage/Dropbox/BOLDistilled_Libraries/2026_Apr/BOLDistilled_COI_Apr2026_SEQUENCES_vsearch'
+BOLDistilled_taxonomy   <- '/Users/kenthompson/Library/CloudStorage/Dropbox/BOLDistilled_Libraries/2026_Apr/BOLDistilled_COI_Apr2026_TAXONOMY.tsv'
+
+mw_esv_fasta <- PHAUS_MBC_ILL_MetaWorks %>%
+  distinct(COI_GlobalESV, ESVseq) %>%
+  group_by(COI_GlobalESV) %>%
+  slice(1) %>%
+  ungroup()
+
+mw_fasta_tmp    <- tempfile(fileext = ".fasta")
+mw_vsearch_out  <- tempfile(fileext = ".txt")
+
+writeLines(
+  with(mw_esv_fasta, paste0(">", COI_GlobalESV, "\n", toupper(ESVseq))),
+  mw_fasta_tmp
+)
+
+message("Running VSEARCH BIN matching for MetaWorks ESVs...")
+system(paste(
+  "vsearch --usearch_global", shQuote(mw_fasta_tmp),
+  "--db",                     shQuote(BOLDistilled_vsearch_db),
+  "--blast6out",              shQuote(mw_vsearch_out),
+  "--id 0.75 --maxhits 5 --maxaccepts 5 --threads 12"
+))
+
+mw_bin_tax <- read_tsv(BOLDistilled_taxonomy, show_col_types = FALSE) %>%
+  rename(bin_uri = bin)
+
+mw_bin_matched <- read_tsv(mw_vsearch_out, col_names = FALSE, show_col_types = FALSE) %>%
+  select(COI_GlobalESV = X1, Hit = X2, Pct_ID = X3, Overlap_bp = X4) %>%
+  filter(Overlap_bp >= 380) %>%
+  arrange(COI_GlobalESV, desc(Pct_ID), desc(Overlap_bp)) %>%
+  distinct(COI_GlobalESV, .keep_all = TRUE) %>%
+  mutate(bin_uri  = map_chr(strsplit(Hit, "\\|"), 2),
+         BIN_Match = if_else(Pct_ID >= 97.7, "BIN_MATCH", "NO_MATCH")) %>%
+  left_join(mw_bin_tax, by = "bin_uri") %>%
+  select(COI_GlobalESV, bin_uri, BIN_Match, Pct_ID, Overlap_bp,
+         kingdom, phylum, class, order, family, genus, species)
+
+PHAUS_MBC_ILL_MetaWorks <- PHAUS_MBC_ILL_MetaWorks %>%
+  left_join(mw_bin_matched, by = "COI_GlobalESV") %>%
+  drop_na(bin_uri) %>%
   taxon_filter()
 
 GT           <- PHAUS_BOLD_Clean_NTS
