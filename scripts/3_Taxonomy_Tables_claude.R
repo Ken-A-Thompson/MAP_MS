@@ -6,6 +6,7 @@
 # Prerequisites: run 1_read_clean_claude.R first (objects in environment):
 #   PHAUS_MBC_ONT_MAP, PHAUS_MBC_ILL_MAP, PHAUS_ILL_mBRAVE,
 #   PHAUS_MBC_ILL_MetaWorks, PHAUS_MBC_ILL_SPCFY, GT, FACTOR_0001PCT, FACTOR_001PCT
+#   (PHAUS_MBC_ILL_QIIME2 excluded — no taxonomy output)
 #
 # Outputs (supp_tables/):
 #   PHAUS_benchmark_combined_gen.png   — genus-level combined table

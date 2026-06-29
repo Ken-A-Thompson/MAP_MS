@@ -323,10 +323,12 @@ make_joint_mds_figure <- function(filt_list, ground_truth, regime_label) {
 
   # ── Friendly facet labels ─────────────────────────────────────────────────
   method_labels <- c(
-    MAP_ONT = "MAP (ONT)",
-    MAP_ILL = "MAP (ILL)",
-    SPCFY   = "SPCFY",
-    mBRAVE  = "mBRAVE"
+    MAP_ONT    = "MAP (ONT)",
+    MAP_ILL    = "MAP (ILL)",
+    SPCFY      = "SPCFY",
+    mBRAVE     = "mBRAVE",
+    MetaWorks  = "MetaWorks",
+    QIIME2     = "QIIME2"
   )
   lvl_labels <- method_labels[mbc_methods]
 

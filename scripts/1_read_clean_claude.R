@@ -196,6 +196,64 @@ PHAUS_MBC_ILL_MetaWorks <- PHAUS_MBC_ILL_MetaWorks %>%
   drop_na(bin_uri) %>%
   taxon_filter()
 
+# ── QIIME2 (Illumina OTU-level; BIN matching via VSEARCH) ────────────────────
+# Sample columns are FwdUMI + "s" + RevUMI; map to fieldid/rep via parameters file
+qiime_umi_lookup <- read_excel('data/parameters_illumina_PHAUS_2.5.xlsx', sheet = 2,
+                               skip = 7, col_names = FALSE) %>%
+  slice(-1) %>%
+  select(Sample = `...3`, FwdUMI = `...6`, RevUMI = `...7`) %>%
+  filter(!is.na(Sample)) %>%
+  mutate(
+    qiime_key = paste0(FwdUMI, "s", RevUMI),
+    fieldid   = gsub("-", "#", sub("_Rep.*$", "", Sample)),
+    rep       = str_extract(Sample, "(?<=_Rep)\\d+")
+  ) %>%
+  select(qiime_key, fieldid, rep)
+
+qiime_vsearch_out <- tempfile(fileext = ".txt")
+
+message("Running VSEARCH BIN matching for QIIME2 OTUs...")
+qiime_vsearch_status <- system(paste(
+  "vsearch --usearch_global", shQuote('data/benchmarking/QIIME2/dna-sequences.fasta'),
+  "--db",                     shQuote(BOLDistilled_vsearch_db),
+  "--blast6out",              shQuote(qiime_vsearch_out),
+  "--id 0.75 --maxhits 5 --maxaccepts 5 --threads 12"
+))
+if (qiime_vsearch_status != 0)
+  stop("VSEARCH failed for QIIME2 (exit code ", qiime_vsearch_status, ")")
+if (file.info(qiime_vsearch_out)$size == 0)
+  stop("VSEARCH produced no output for QIIME2. Check database path:\n  ", BOLDistilled_vsearch_db)
+
+qiime_bin_matched <- read_tsv(qiime_vsearch_out, col_names = FALSE, show_col_types = FALSE) %>%
+  select(OTU_ID = X1, Hit = X2, Pct_ID = X3, Overlap_bp = X4) %>%
+  filter(Overlap_bp >= 380) %>%
+  arrange(OTU_ID, desc(Pct_ID), desc(Overlap_bp)) %>%
+  distinct(OTU_ID, .keep_all = TRUE) %>%
+  mutate(
+    bin_uri   = map_chr(strsplit(Hit, "\\|"), 2),
+    BIN_Match = if_else(Pct_ID >= 97.7, "BIN_MATCH", "NO_MATCH")
+  ) %>%
+  left_join(mw_bin_tax, by = "bin_uri") %>%
+  select(OTU_ID, bin_uri, BIN_Match, Pct_ID, Overlap_bp,
+         kingdom, phylum, class, order, family, genus, species)
+
+PHAUS_MBC_ILL_QIIME2 <- read_tsv('data/benchmarking/QIIME2/otu-table.tsv',
+                                  skip = 1, show_col_types = FALSE) %>%
+  rename(OTU_ID = `#OTU ID`) %>%
+  pivot_longer(-OTU_ID, names_to = "qiime_key", values_to = "reads") %>%
+  filter(reads > 0) %>%
+  left_join(qiime_umi_lookup, by = "qiime_key") %>%
+  filter(!is.na(fieldid), fieldid %in% collections_sample_data$Lot_fieldID) %>%
+  group_by(fieldid, OTU_ID) %>%
+  summarise(
+    tot_reads  = sum(reads),
+    replicates = n_distinct(rep),
+    .groups    = "drop"
+  ) %>%
+  left_join(qiime_bin_matched, by = "OTU_ID") %>%
+  drop_na(bin_uri) %>%
+  taxon_filter()
+
 GT           <- PHAUS_BOLD_Clean_NTS
 GT_parent    <- PHAUS_BOLD_Clean_NTS %>% filter(record_type == "parent")
 FACTOR_0001PCT <- 1e-06   # 0.0001% of sample reads
@@ -214,10 +272,12 @@ apply_prop_filter <- function(data, factor) {
 
 # ── Dataset registry ──────────────────────────────────────────────────────────
 datasets <- list(
-  list(data = PHAUS_MBC_ONT_MAP,    Software = "MAP",    Dataset = "ONT", method = "MAP_ONT"),
-  list(data = PHAUS_MBC_ILL_MAP,    Software = "MAP",    Dataset = "ILL", method = "MAP_ILL"),
-  list(data = PHAUS_MBC_ILL_SPCFY,  Software = "SPCFY",  Dataset = "ILL", method = "SPCFY"),
-  list(data = PHAUS_ILL_mBRAVE,     Software = "mBRAVE", Dataset = "ILL", method = "mBRAVE")
+  list(data = PHAUS_MBC_ONT_MAP,      Software = "MAP",       Dataset = "ONT", method = "MAP_ONT"),
+  list(data = PHAUS_MBC_ILL_MAP,      Software = "MAP",       Dataset = "ILL", method = "MAP_ILL"),
+  list(data = PHAUS_MBC_ILL_SPCFY,    Software = "SPCFY",     Dataset = "ILL", method = "SPCFY"),
+  list(data = PHAUS_ILL_mBRAVE,       Software = "mBRAVE",    Dataset = "ILL", method = "mBRAVE"),
+  list(data = PHAUS_MBC_ILL_MetaWorks, Software = "MetaWorks", Dataset = "ILL", method = "MetaWorks"),
+  list(data = PHAUS_MBC_ILL_QIIME2,   Software = "QIIME2",    Dataset = "ILL", method = "QIIME2")
 )
 
 # ── Helper: assemble bench table ─────────────────────────────────────────────
