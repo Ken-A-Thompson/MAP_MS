@@ -59,31 +59,6 @@ unfilt_euclid_97 <- euclid_from_nmds(
 
 bench_unfilt_97 <- assemble_bench(unfilt_metrics_97, unfilt_euclid_97)
 
-message("Computing metrics: best filter (≥97.7% ID)...")
-
-best_metrics_97 <- map_dfr(datasets_map97, function(d) {
-  abg <- compute_a_b_g(MBC_data = d$data, GT_data = GT)
-  slice(abg, which.min(rank_sum)) %>%
-    select(tot_reads, replicates, est, mntl, recall, f1) %>%
-    mutate(Software = d$Software, Dataset = d$Dataset, method = d$method)
-})
-
-best_filtered_list_97 <- set_names(
-  map(datasets_map97, function(d) {
-    br <- filter(best_metrics_97, method == d$method)
-    d$data %>%
-      filter(tot_reads  >= br$tot_reads,
-             replicates >= as.integer(as.character(br$replicates)))
-  }),
-  map_chr(datasets_map97, "method")
-)
-
-best_n_reads_97  <- imap_dfr(best_filtered_list_97,
-                               ~ tibble(method = .y, n_reads = sum(.x$tot_reads)))
-best_metrics_97  <- best_metrics_97 %>% left_join(best_n_reads_97, by = "method")
-best_euclid_97   <- euclid_from_nmds(best_filtered_list_97, GT)
-bench_best_97    <- assemble_bench(best_metrics_97, best_euclid_97)
-
 message("Computing metrics: smart filter (≥97.7% ID)...")
 
 smart_metrics_97 <- map_dfr(datasets_map97, function(d) {
@@ -142,7 +117,6 @@ value_cols <- c("est", "mntl", "recall", "f1")
 
 bench_all_97 <- dplyr::bind_rows(
   bench_unfilt_97 %>% mutate(Filter = "Unfiltered"),
-  bench_best_97   %>% mutate(Filter = "Best filtering parameters"),
   bench_smart_97  %>% mutate(Filter = "Smart filter\n(≥ 0.001% reads in sample)")
 ) %>%
   select(Filter, everything())

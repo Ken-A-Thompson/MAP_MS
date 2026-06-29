@@ -16,9 +16,9 @@ source("scripts/0_functions.R")
 
 # Prerequisite: 1_read_clean_claude.R and 2_Benchmarking_Table_claude.R must
 # be run first.
-# Requires in environment: GT, datasets, best_filtered_list,
+# Requires in environment: GT, datasets,
 #                          filter_0001pct_list, filter_001pct_list,
-#                          bench_unfilt, bench_0001pct, bench_001pct, bench_best
+#                          bench_unfilt, bench_0001pct, bench_001pct
 
 # ── Output directory ──────────────────────────────────────────────────────────
 dir.create("figs_tables/claude_figs", recursive = TRUE, showWarnings = FALSE)
@@ -204,22 +204,18 @@ make_venn_panel <- function(filt_data, ground_truth, f1_score = NULL) {
 filt_pool <- list(
   unfilt         = set_names(map(datasets, "data"), map_chr(datasets, "method")),
   filter_0001pct = filter_0001pct_list,
-  filter_001pct  = filter_001pct_list,
-  best           = best_filtered_list
+  filter_001pct  = filter_001pct_list
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Main loop — one PNG per dataset × regime
-# Unfiltered / 0.0001% / 0.001% = main figures
-# Best = supplementary figures
 # ══════════════════════════════════════════════════════════════════════════════
-regimes <- c("unfilt", "filter_0001pct", "filter_001pct", "best")
+regimes <- c("unfilt", "filter_0001pct", "filter_001pct")
 
 regime_labels <- c(
   unfilt         = "Unfiltered",
   filter_0001pct = "0.0001% filter",
-  filter_001pct  = "0.001% filter",
-  best           = "Best filter (supplementary)"
+  filter_001pct  = "0.001% filter"
 )
 
 walk(datasets, function(d) {
@@ -237,8 +233,7 @@ walk(datasets, function(d) {
     bench_obj <- switch(regime,
       unfilt         = bench_unfilt,
       filter_0001pct = bench_0001pct,
-      filter_001pct  = bench_001pct,
-      best           = bench_best
+      filter_001pct  = bench_001pct
     )
     bench_row <- bench_obj %>%
       filter(Software == d$Software, Dataset == d$Dataset)

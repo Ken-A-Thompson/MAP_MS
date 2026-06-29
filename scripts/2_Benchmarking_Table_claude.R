@@ -1,14 +1,13 @@
 # 2_Benchmarking_Table_claude.R
 # ──────────────────────────────────────────────────────────────────────────────
 # Prerequisites (produced by 1_read_clean_claude.R):
-#   bench_unfilt, bench_0001pct, bench_001pct, bench_best  — all records GT
+#   bench_unfilt, bench_0001pct, bench_001pct  — all records GT
 #   bench_unfilt_parent, bench_0001pct_parent,
-#   bench_001pct_parent, bench_best_parent                 — parent-only GT
+#   bench_001pct_parent                        — parent-only GT
 #
 # Outputs:
 #   figs_tables/PHAUS_benchmark_comparison.docx
 #   figs_tables/PHAUS_benchmark_combined.docx / .png   (main: unfilt/0.0001%/0.001%)
-#   figs_tables/PHAUS_benchmark_supp_best.png           (supplementary: best filter)
 #   figs_tables/PHAUS_benchmark_combined_TARGET_ONLY.png  (parent-only GT)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -133,7 +132,6 @@ make_bench_ft <- function(bench_table, prefix_ge = FALSE) {
 ft_unfilt   <- make_bench_ft(bench_unfilt)
 ft_0001pct  <- make_bench_ft(bench_0001pct, prefix_ge = TRUE)
 ft_001pct   <- make_bench_ft(bench_001pct,  prefix_ge = TRUE)
-ft_best     <- make_bench_ft(bench_best,    prefix_ge = TRUE)
 
 # ── Combine into one Word document ────────────────────────────────────────────
 doc <- read_docx() %>%
@@ -146,11 +144,7 @@ doc <- read_docx() %>%
   body_add_par("", style = "Normal") %>%
   body_add_par("Table 3: Proportional filter (≥ 0.001% of sample reads)",
                style = "heading 1") %>%
-  body_add_flextable(ft_001pct) %>%
-  body_add_par("", style = "Normal") %>%
-  body_add_par("Table S1: Best filtering parameters (supplementary)",
-               style = "heading 1") %>%
-  body_add_flextable(ft_best)
+  body_add_flextable(ft_001pct)
 
 print(doc, target = "figs_tables/PHAUS_benchmark_comparison.docx")
 
@@ -300,24 +294,6 @@ message("Saved: figs_tables/PHAUS_benchmark_combined.docx")
 
 save_as_image(ft_all, path = "figs_tables/PHAUS_benchmark_combined.png", zoom = 3, expand = 10)
 message("Saved: figs_tables/PHAUS_benchmark_combined.png")
-
-# ── Supplementary table: best filter ─────────────────────────────────────────
-ft_supp_best <- make_bench_ft(bench_best, prefix_ge = TRUE)
-
-doc_supp <- read_docx() %>%
-  body_add_par("Supplementary Table: Best filtering parameters", style = "heading 1") %>%
-  body_add_par(
-    "Optimal min-reads and min-replicates thresholds identified by grid search over α, β, and γ diversity metrics.",
-    style = "Normal"
-  ) %>%
-  body_add_par("", style = "Normal") %>%
-  body_add_flextable(ft_supp_best)
-
-print(doc_supp, target = "figs_tables/PHAUS_benchmark_supp_best.docx")
-message("Saved: figs_tables/PHAUS_benchmark_supp_best.docx")
-
-save_as_image(ft_supp_best, path = "figs_tables/PHAUS_benchmark_supp_best.png", zoom = 3, expand = 10)
-message("Saved: figs_tables/PHAUS_benchmark_supp_best.png")
 
 # ── Parent-only ground truth ──────────────────────────────────────────────────
 ft_all_parent <- make_combined_ft(bench_unfilt_parent, bench_0001pct_parent, bench_001pct_parent)
