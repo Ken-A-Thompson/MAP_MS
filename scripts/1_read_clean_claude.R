@@ -11,6 +11,7 @@ library(readxl)
 
 source("scripts/0_functions.R")
 
+
 # ── Filter Cassette ───────────────────────────────────────────────────────────
 # Edit here to apply consistent taxonomy filters across all datasets
 # Also potentially just edit to have general quality
@@ -56,7 +57,7 @@ PHAUS_MBC_ONT_MAP <- read_tsv('data/MAP_output/PHAUS_ONT.MAP2026_06_17/Metabarco
 #   select(fieldid, tot_reads, OTU_ID, replicates, kingdom:bin_uri) %>%
 #   taxon_filter()
 
-PHAUS_MBC_ILL_MAP <- read_tsv('data/MAP_output/PHAUS_ILL.MAP2026-06-11/Metabarcoding_Results_PHAUS_COI-5P_418_BySample 4.tsv') %>%
+PHAUS_MBC_ILL_MAP <- read_tsv('data/MAP_output/PHAUS_ILL.MAP2026-07-01/Metabarcoding_Results_PHAUS_COI-5P_418_BySample.tsv') %>%
   # filter(`%ID_match_to_BIN` > 97.6) %>%
   filter(Number_N <= 4) %>%
   filter(between(Seq_Length, 409, 424)) %>%
@@ -147,35 +148,59 @@ PHAUS_MBC_ILL_MetaWorks <- read_csv('data/benchmarking/MetaWorks/2026-06-28/resu
     .groups    = "drop"
   )
 
+# ── VSEARCH helpers ───────────────────────────────────────────────────────────
+# BOLDistilled_vsearch_db <- '/Users/kenthompson/Library/CloudStorage/Dropbox/BOLDistilled_Libraries/2026_Apr/BOLDistilled_COI_Apr2026_SEQUENCES_vsearch'
+# BOLDistilled_taxonomy   <- '/Users/kenthompson/Library/CloudStorage/Dropbox/BOLDistilled_Libraries/2026_Apr/BOLDistilled_COI_Apr2026_TAXONOMY.tsv'
+
+BOLDistilled_vsearch_db <- '../../../Dropbox/BOLDistilled_Libraries/2026_Apr/BOLDistilled_COI_Apr2026_SEQUENCES_vsearch'
+BOLDistilled_taxonomy   <- '../../../Dropbox/BOLDistilled_Libraries/2026_Apr/BOLDistilled_COI_Apr2026_TAXONOMY.tsv'
+
+
+# Build a cache path keyed on input folder name + library folder name.
+# Cache is reused only when both are unchanged; any version bump invalidates it.
+vsearch_cache_path <- function(prefix, input_file, db_path) {
+  input_key <- basename(dirname(normalizePath(input_file, mustWork = FALSE)))
+  lib_key   <- basename(dirname(db_path))
+  file.path("data/vsearch_cache", paste0(prefix, "_", input_key, "_", lib_key, ".txt"))
+}
+
+run_vsearch <- function(fasta_path, db_path, out_path) {
+  status <- system(paste(
+    "vsearch --usearch_global", shQuote(fasta_path),
+    "--db",                     shQuote(db_path),
+    "--blast6out",              shQuote(out_path),
+    "--id 0.75 --maxhits 5 --maxaccepts 5 --threads 12"
+  ))
+  if (status != 0)
+    stop("VSEARCH failed (exit code ", status, ").\n  db: ", db_path)
+  if (file.info(out_path)$size == 0)
+    stop("VSEARCH produced no output. Check db path:\n  ", db_path)
+}
+
+dir.create("data/vsearch_cache", recursive = TRUE, showWarnings = FALSE)
+
 # ── MetaWorks BIN matching via VSEARCH ───────────────────────────────────────
-BOLDistilled_vsearch_db <- '/Users/kenthompson/Library/CloudStorage/Dropbox/BOLDistilled_Libraries/2026_Apr/BOLDistilled_COI_Apr2026_SEQUENCES_vsearch'
-BOLDistilled_taxonomy   <- '/Users/kenthompson/Library/CloudStorage/Dropbox/BOLDistilled_Libraries/2026_Apr/BOLDistilled_COI_Apr2026_TAXONOMY.tsv'
+mw_input_csv   <- 'data/benchmarking/MetaWorks/2026-06-28/results_OTU.csv'
+mw_vsearch_out <- vsearch_cache_path("mw", mw_input_csv, BOLDistilled_vsearch_db)
 
 mw_esv_fasta <- PHAUS_MBC_ILL_MetaWorks %>%
   group_by(COI_GlobalESV) %>%
   slice(1) %>%
   ungroup()
 
-mw_fasta_tmp    <- tempfile(fileext = ".fasta")
-mw_vsearch_out  <- tempfile(fileext = ".txt")
-
-writeLines(
-  with(mw_esv_fasta, paste0(">", COI_GlobalESV, "\n", toupper(ESVseq))),
-  mw_fasta_tmp
-)
-
-message("Running VSEARCH BIN matching for MetaWorks ESVs...")
-vsearch_status <- system(paste(
-  "vsearch --usearch_global", shQuote(mw_fasta_tmp),
-  "--db",                     shQuote(BOLDistilled_vsearch_db),
-  "--blast6out",              shQuote(mw_vsearch_out),
-  "--id 0.75 --maxhits 5 --maxaccepts 5 --threads 12"
-))
-if (vsearch_status != 0)
-  stop("VSEARCH exited with code ", vsearch_status,
-       ". Check that vsearch is on PATH and the database exists:\n  ", BOLDistilled_vsearch_db)
-if (file.info(mw_vsearch_out)$size == 0)
-  stop("VSEARCH produced no output (empty blast6out). Check database path:\n  ", BOLDistilled_vsearch_db)
+if (!file.exists(mw_vsearch_out) || file.info(mw_vsearch_out)$size == 0) {
+  mw_fasta_tmp <- tempfile(fileext = ".fasta")
+  writeLines(
+    with(mw_esv_fasta, paste0(">", COI_GlobalESV, "\n", toupper(ESVseq))),
+    mw_fasta_tmp
+  )
+  message("Running VSEARCH for MetaWorks (",
+          basename(dirname(mw_input_csv)), " × ",
+          basename(dirname(BOLDistilled_vsearch_db)), ")...")
+  run_vsearch(mw_fasta_tmp, BOLDistilled_vsearch_db, mw_vsearch_out)
+} else {
+  message("Using cached MetaWorks VSEARCH: ", basename(mw_vsearch_out))
+}
 
 mw_bin_tax <- read_tsv(BOLDistilled_taxonomy, show_col_types = FALSE) %>%
   rename(bin_uri = bin)
@@ -197,32 +222,18 @@ PHAUS_MBC_ILL_MetaWorks <- PHAUS_MBC_ILL_MetaWorks %>%
   taxon_filter()
 
 # ── QIIME2 (Illumina OTU-level; BIN matching via VSEARCH) ────────────────────
-# Sample columns are FwdUMI + "s" + RevUMI; map to fieldid/rep via parameters file
-qiime_umi_lookup <- read_excel('data/parameters_illumina_PHAUS_2.5.xlsx', sheet = 2,
-                               skip = 7, col_names = FALSE) %>%
-  slice(-1) %>%
-  select(Sample = `...3`, FwdUMI = `...6`, RevUMI = `...7`) %>%
-  filter(!is.na(Sample)) %>%
-  mutate(
-    qiime_key = paste0(FwdUMI, "s", RevUMI),
-    fieldid   = gsub("-", "#", sub("_Rep.*$", "", Sample)),
-    rep       = str_extract(Sample, "(?<=_Rep)\\d+")
-  ) %>%
-  select(qiime_key, fieldid, rep)
+# Sample columns: GMP-58226_Rep1 → fieldid = GMP#58226, rep = 1
+qiime_fasta       <- 'data/benchmarking/QIIME2/2026-06-30/dna-sequences_rep.fasta'
+qiime_vsearch_out <- vsearch_cache_path("qiime", qiime_fasta, BOLDistilled_vsearch_db)
 
-qiime_vsearch_out <- tempfile(fileext = ".txt")
-
-message("Running VSEARCH BIN matching for QIIME2 OTUs...")
-qiime_vsearch_status <- system(paste(
-  "vsearch --usearch_global", shQuote('data/benchmarking/QIIME2/dna-sequences.fasta'),
-  "--db",                     shQuote(BOLDistilled_vsearch_db),
-  "--blast6out",              shQuote(qiime_vsearch_out),
-  "--id 0.75 --maxhits 5 --maxaccepts 5 --threads 12"
-))
-if (qiime_vsearch_status != 0)
-  stop("VSEARCH failed for QIIME2 (exit code ", qiime_vsearch_status, ")")
-if (file.info(qiime_vsearch_out)$size == 0)
-  stop("VSEARCH produced no output for QIIME2. Check database path:\n  ", BOLDistilled_vsearch_db)
+if (!file.exists(qiime_vsearch_out) || file.info(qiime_vsearch_out)$size == 0) {
+  message("Running VSEARCH for QIIME2 (",
+          basename(dirname(qiime_fasta)), " × ",
+          basename(dirname(BOLDistilled_vsearch_db)), ")...")
+  run_vsearch(qiime_fasta, BOLDistilled_vsearch_db, qiime_vsearch_out)
+} else {
+  message("Using cached QIIME2 VSEARCH: ", basename(qiime_vsearch_out))
+}
 
 qiime_bin_matched <- read_tsv(qiime_vsearch_out, col_names = FALSE, show_col_types = FALSE) %>%
   select(OTU_ID = X1, Hit = X2, Pct_ID = X3, Overlap_bp = X4) %>%
@@ -237,12 +248,15 @@ qiime_bin_matched <- read_tsv(qiime_vsearch_out, col_names = FALSE, show_col_typ
   select(OTU_ID, bin_uri, BIN_Match, Pct_ID, Overlap_bp,
          kingdom, phylum, class, order, family, genus, species)
 
-PHAUS_MBC_ILL_QIIME2 <- read_tsv('data/benchmarking/QIIME2/otu-table.tsv',
+PHAUS_MBC_ILL_QIIME2 <- read_tsv('data/benchmarking/QIIME2/2026-06-30/exported-otu-table-dn-97.tsv',
                                   skip = 1, show_col_types = FALSE) %>%
   rename(OTU_ID = `#OTU ID`) %>%
-  pivot_longer(-OTU_ID, names_to = "qiime_key", values_to = "reads") %>%
+  pivot_longer(-OTU_ID, names_to = "sample_key", values_to = "reads") %>%
   filter(reads > 0) %>%
-  left_join(qiime_umi_lookup, by = "qiime_key") %>%
+  mutate(
+    fieldid = gsub("-", "#", sub("_Rep.*$", "", sample_key)),
+    rep     = str_extract(sample_key, "(?<=_Rep)\\d+")
+  ) %>%
   filter(!is.na(fieldid), fieldid %in% collections_sample_data$Lot_fieldID) %>%
   group_by(fieldid, OTU_ID) %>%
   summarise(
@@ -272,19 +286,19 @@ apply_prop_filter <- function(data, factor) {
 
 # ── Dataset registry ──────────────────────────────────────────────────────────
 datasets <- list(
-  list(data = PHAUS_MBC_ONT_MAP,      Software = "MAP",       Dataset = "ONT", method = "MAP_ONT"),
-  list(data = PHAUS_MBC_ILL_MAP,      Software = "MAP",       Dataset = "ILL", method = "MAP_ILL"),
-  list(data = PHAUS_MBC_ILL_SPCFY,    Software = "SPCFY",     Dataset = "ILL", method = "SPCFY"),
-  list(data = PHAUS_ILL_mBRAVE,       Software = "mBRAVE",    Dataset = "ILL", method = "mBRAVE"),
-  list(data = PHAUS_MBC_ILL_MetaWorks, Software = "MetaWorks", Dataset = "ILL", method = "MetaWorks"),
-  list(data = PHAUS_MBC_ILL_QIIME2,   Software = "QIIME2",    Dataset = "ILL", method = "QIIME2")
+  list(data = PHAUS_MBC_ONT_MAP,       Software = "MAP",        Dataset = "ONT", method = "MAP_ONT"),
+  list(data = PHAUS_MBC_ILL_MAP,       Software = "MAP",        Dataset = "ILL", method = "MAP_ILL"),
+  list(data = PHAUS_MBC_ILL_SPCFY,     Software = "spcfy.io",   Dataset = "ILL", method = "SPCFY"),
+  list(data = PHAUS_ILL_mBRAVE,        Software = "mBRAVE",     Dataset = "ILL", method = "mBRAVE"),
+  list(data = PHAUS_MBC_ILL_MetaWorks, Software = "MetaWorks",  Dataset = "ILL", method = "MetaWorks"),
+  list(data = PHAUS_MBC_ILL_QIIME2,    Software = "QIIME2",     Dataset = "ILL", method = "QIIME2")
 )
 
 # ── Helper: assemble bench table ─────────────────────────────────────────────
 assemble_bench <- function(metrics_df) {
   metrics_df %>%
     mutate(replicates = as.integer(as.character(replicates)),
-           across(where(is.double), ~ round(.x, 3))) %>%
+           across(c(est, spearman, mntl, bc_mean, bc_sd, recall, f1), ~ signif(.x, 2))) %>%
     select(Software, Dataset, tot_reads, replicates, n_reads, est, spearman, mntl, bc_mean, bc_sd, recall, f1)
 }
 

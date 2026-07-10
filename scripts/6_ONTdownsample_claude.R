@@ -18,7 +18,7 @@ library(vegan)
 library(DescTools)
 
 source("scripts/0_functions.R")
-source("scripts/1_read_clean_claude.R")   # PHAUS_MBC_ONT_MAP, PHAUS_MBC_ILL_MAP, GT
+if (!exists("PHAUS_MBC_ILL_MetaWorks")) source("scripts/1_read_clean_claude.R")
 
 dir.create("figs_tables/claude_figs", recursive = TRUE, showWarnings = FALSE)
 
@@ -157,11 +157,17 @@ p <- ggplot() +
       "Green diamond: ILL MAP  |  Red diamond: ONT Full"
     )
   ) +
-  theme_bw(base_size = 11) +
+  theme_bw(base_size = 14) +
   theme(
     strip.background = element_rect(fill = "grey92", colour = "grey70"),
-    strip.text       = element_markdown(face = "bold", size = 10),
-    axis.text.x      = element_text(size = 9)
+    strip.text       = element_markdown(face = "bold", size = 13),
+    axis.text        = element_text(size = 13),
+    axis.text.x      = element_text(size = 13),
+    axis.title       = element_text(size = 14),
+    legend.text      = element_text(size = 13),
+    legend.title     = element_text(size = 13),
+    plot.title       = element_text(size = 15, face = "bold"),
+    plot.subtitle    = element_text(size = 12, colour = "grey30")
   )
 
 out_path <- "figs_tables/claude_figs/Fig_ONT_downsample.png"

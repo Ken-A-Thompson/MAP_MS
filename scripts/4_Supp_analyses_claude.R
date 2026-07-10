@@ -123,7 +123,6 @@ bench_all_97 <- dplyr::bind_rows(
 
 bench_all_display_97 <- bench_all_97 %>%
   mutate(
-    Software  = recode(Software, "SPCFY" = "spcfy.io"),
     Dataset   = recode(Dataset, "ILL" = "Illumina", "ONT" = "Nanopore"),
     tot_reads = ifelse(Filter == "Smart filter\n(≥ 0.001% reads in sample)",
                        paste0("≥", tot_reads),

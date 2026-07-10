@@ -4,8 +4,8 @@
 # across all four methods and plots how α/β/γ metrics respond.
 #
 # Requires in environment (run 1_read_clean_claude.R first):
-#   PHAUS_MBC_ONT_MAP, PHAUS_MBC_ILL_MAP, PHAUS_MBC_ILL_SPCFY,
-#   PHAUS_ILL_mBRAVE, PHAUS_BOLD_Clean_NTS
+#   datasets, PHAUS_BOLD_Clean_NTS
+#   (datasets is the same list used by 2_Benchmarking_Table_claude.R)
 #
 # Output: figs_tables/claude_figs/Fig_sensitivity.png
 # ──────────────────────────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ library(ggh4x)
 library(ggtext)
 
 source("scripts/0_functions.R")
-source("scripts/1_read_clean_claude.R")
+if (!exists("PHAUS_MBC_ILL_MetaWorks")) source("scripts/1_read_clean_claude.R")
 
 dir.create("figs_tables/claude_figs", recursive = TRUE, showWarnings = FALSE)
 
@@ -28,13 +28,13 @@ CURRENT_THRESHOLD <- 5e-06   # 0.0005% — the value used in the paper
 # (current value sits at position ~8 in this sequence)
 thresholds <- 10^seq(-7, -3, length.out = 20)
 
-# ── Method registry ───────────────────────────────────────────────────────────
-methods <- list(
-  list(name = "MAP (ONT)", data = PHAUS_MBC_ONT_MAP),
-  list(name = "MAP (ILL)", data = PHAUS_MBC_ILL_MAP),
-  list(name = "spcfy.io",  data = PHAUS_MBC_ILL_SPCFY),
-  list(name = "mBRAVE",   data = PHAUS_ILL_mBRAVE)
-)
+# ── Method registry — derived from `datasets` so data is identical to Table 2 ─
+methods <- lapply(datasets, function(d) {
+  list(
+    name = if (d$Software == "MAP") paste0("MAP (", d$Dataset, ")") else d$Software,
+    data = d$data
+  )
+})
 
 # ── Sweep thresholds × methods ────────────────────────────────────────────────
 # mantel_permutations = 99 keeps runtime reasonable for 20 × 4 = 80 calls;
@@ -87,10 +87,12 @@ results_long <- results %>%
 
 # ── Plot ──────────────────────────────────────────────────────────────────────
 method_colours <- c(
-  "MAP (ONT)" = "#1F4E79",
-  "MAP (ILL)" = "#2ECC71",
-  "spcfy.io"  = "#E67E22",
-  "mBRAVE"    = "#C0392B"
+  "MAP (ONT)"  = "#1F4E79",
+  "MAP (ILL)"  = "#2ECC71",
+  "spcfy.io"   = "#E67E22",
+  "mBRAVE"     = "#C0392B",
+  "MetaWorks"  = "#9B59B6",
+  "QIIME2"     = "#2C2C2C"
 )
 
 p <- ggplot(results_long,
@@ -100,11 +102,7 @@ p <- ggplot(results_long,
   geom_line(linewidth = 0.85, alpha = 0.9) +
   geom_point(size = 1.8, alpha = 0.9) +
 
-  # Current threshold marker
-  geom_vline(xintercept = CURRENT_THRESHOLD * 100,
-             linetype = "dashed", colour = "black", linewidth = 0.65) +
-
-  facet_wrap(~ metric, scales = "free_y", nrow = 2) +
+  facet_wrap(~ metric, scales = "free_y", nrow = 3) +
   facetted_pos_scales(y = list(
     NULL,              # CCC
     NULL,              # Spearman rho
@@ -129,25 +127,28 @@ p <- ggplot(results_long,
   scale_colour_manual(values = method_colours, name = NULL) +
 
   labs(
-    title    = "Metric sensitivity across proportional filter thresholds",
-    subtitle = paste0("Dashed line = current threshold (5e-6 = 0.0005% of sample reads)  |  ",
-                      "20 log-spaced values from 1e-7 to 1e-3"),
+    title    = NULL,
+    subtitle = NULL,
     y        = "Metric value"
   ) +
 
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 14) +
   theme(
     legend.position      = "bottom",
     legend.key.width     = unit(1.5, "cm"),
+    legend.text          = element_text(size = 13),
+    legend.title         = element_text(size = 13),
     panel.grid.minor     = element_blank(),
     strip.background     = element_rect(fill = "grey92", colour = "grey70"),
-    strip.text           = element_markdown(face = "bold", size = 10),
-    plot.title           = element_text(face = "bold", size = 13),
-    plot.subtitle        = element_text(size = 10, colour = "grey30"),
-    axis.text.x          = element_text(angle = 35, hjust = 1, size = 9)
+    strip.text           = element_markdown(face = "bold", size = 13),
+    plot.title           = element_text(face = "bold", size = 16),
+    plot.subtitle        = element_text(size = 12, colour = "grey30"),
+    axis.text            = element_text(size = 13),
+    axis.text.x          = element_text(angle = 35, hjust = 1, size = 13),
+    axis.title           = element_text(size = 14)
   )
 
 out_path <- "figs_tables/claude_figs/Fig_sensitivity.png"
-ggsave(out_path, p, width = 340, height = 200, units = "mm", dpi = 300, bg = "white")
+ggsave(out_path, p, width = 340, height = 290, units = "mm", dpi = 300, bg = "white")
 
 message("Saved: ", out_path)
