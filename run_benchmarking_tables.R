@@ -1,25 +1,53 @@
-# 2_Benchmarking_Table_claude.R
-# ──────────────────────────────────────────────────────────────────────────────
-# Prerequisites (produced by 1_read_clean_claude.R):
-#   bench_unfilt, bench_0001pct, bench_001pct  — all records GT
-#   bench_unfilt_parent, bench_0001pct_parent,
-#   bench_001pct_parent                        — parent-only GT
+# run_benchmarking_tables.R
+# Reproduces all PHAUS benchmarking tables and figures from pre-computed data.
 #
-# Outputs:
-#   figs_tables/PHAUS_benchmark_comparison.docx
-#   figs_tables/PHAUS_benchmark_combined.docx / .png   (main: unfilt/0.0001%/0.001%)
-#   figs_tables/PHAUS_benchmark_combined_TARGET_ONLY.png  (parent-only GT)
-# ──────────────────────────────────────────────────────────────────────────────
+# Usage:
+#   1. Open this file in RStudio and click "Source", OR
+#   2. From a terminal: Rscript run_benchmarking_tables.R
+#
+# Outputs (written to figs_tables/ in the same folder as this script):
+#   PHAUS_benchmark_comparison.docx
+#   PHAUS_benchmark_combined.docx / .png
+#   PHAUS_benchmark_combined_TARGET_ONLY.docx / .png
+#   PHAUS_benchmark_combined_RANKS.png
+#   PHAUS_benchmark_combined_TARGET_ONLY_RANKS.png
+#   Ranks_Fig_For_Paul.docx / .png
+
+# ── Auto-install missing packages ─────────────────────────────────────────────
+pkgs <- c("tidyverse", "flextable", "officer")
+new  <- pkgs[!pkgs %in% rownames(installed.packages())]
+if (length(new)) {
+  message("Installing missing packages: ", paste(new, collapse = ", "))
+  install.packages(new, repos = "https://cloud.r-project.org")
+}
 
 library(tidyverse)
 library(flextable)
 library(officer)
 
-# Dataset display colours
-PUMPKIN <- "#E67E22"   # Illumina
-NAVY    <- "#1F4E79"   # Nanopore
+# ── Locate script directory and set paths ─────────────────────────────────────
+script_dir <- if (interactive()) {
+  dirname(rstudioapi::getSourceEditorContext()$path)
+} else {
+  dirname(normalizePath(commandArgs(trailingOnly = FALSE)[
+    grep("--file=", commandArgs(trailingOnly = FALSE))
+  ][1], mustWork = FALSE) |> sub("^--file=", "", x = _))
+}
+if (is.na(script_dir) || script_dir == "") script_dir <- getwd()
 
-# Style Dataset cells by value (colour + bold)
+data_file  <- file.path(script_dir, "bench_data.rda")
+output_dir <- file.path(script_dir, "figs_tables")
+
+if (!file.exists(data_file)) stop("bench_data.rda not found at: ", data_file)
+dir.create(output_dir, showWarnings = FALSE)
+
+load(data_file)
+message("Loaded bench_data.rda")
+
+# ── Dataset display colours ────────────────────────────────────────────────────
+PUMPKIN <- "#E67E22"
+NAVY    <- "#1F4E79"
+
 style_dataset_cells <- function(ft, dataset_vec) {
   ill_rows <- which(dataset_vec == "Illumina")
   ont_rows <- which(dataset_vec == "Nanopore")
@@ -34,10 +62,6 @@ style_dataset_cells <- function(ft, dataset_vec) {
   ft
 }
 
-# ── Format a value to 2 significant figures, preserving trailing zeros ────────
-fmt_sig2 <- function(x) sub("\\.$", "", sprintf("%#.2g", x))
-
-# ── Colour scale: green gradient, higher = better ─────────────────────────────
 scale_col <- function(x, reverse = FALSE) {
   x_num <- suppressWarnings(as.numeric(x))
   rng   <- range(x_num, na.rm = TRUE)
@@ -50,23 +74,17 @@ scale_col <- function(x, reverse = FALSE) {
   sprintf("#%02X%02X%02X", r, g, b)
 }
 
-# ── Flextable builder ─────────────────────────────────────────────────────────
+# ── Individual table builder ───────────────────────────────────────────────────
 make_bench_ft <- function(bench_table, prefix_ge = FALSE) {
-  # colour-scaled numeric columns (bc_mean scaled separately, reversed)
-  value_cols_hi  <- c("est", "spearman", "mntl", "recall", "f1")  # higher = better
-  value_cols_lo  <- c("bc_mean")                                   # lower = better
+  value_cols_hi  <- c("est", "spearman", "mntl", "recall", "f1")
+  value_cols_lo  <- c("bc_mean")
 
   display_table <- bench_table %>%
     mutate(
       Dataset   = recode(Dataset, "ILL" = "Illumina", "ONT" = "Nanopore"),
       tot_reads = if (prefix_ge) paste0("≥", tot_reads) else as.character(tot_reads),
       n_reads   = paste0(round(n_reads / 1e6, 1), "M"),
-      bc        = paste0(fmt_sig2(bc_mean), " ± ", fmt_sig2(bc_sd)),
-      est       = fmt_sig2(est),
-      spearman  = fmt_sig2(spearman),
-      mntl      = fmt_sig2(mntl),
-      recall    = as.character(round(recall * 100)),
-      f1        = fmt_sig2(f1)
+      bc        = paste0(bc_mean, " ± ", bc_sd)
     ) %>%
     select(Software, Dataset, tot_reads, replicates, n_reads,
            est, spearman, mntl, bc, recall, f1)
@@ -83,30 +101,18 @@ make_bench_ft <- function(bench_table, prefix_ge = FALSE) {
       recall     = "% Target\n(γ)",
       f1         = "F1-score\n(γ)"
     ) %>%
-    flextable::compose(
-      part  = "header", j = "mntl",
-      value = as_paragraph("Mantel ", as_i("R"), "\n(β)")
-    ) %>%
-    flextable::compose(
-      part  = "header", j = "spearman",
-      value = as_paragraph("Spearman ", as_i("ρ"), "\n(α)")
-    ) %>%
-    flextable::compose(
-      part  = "header", j = "est",
-      value = as_paragraph("CCC\n(α)")
-    ) %>%
-    flextable::compose(
-      part  = "header", j = "bc",
-      value = as_paragraph("Bray-Curtis Dist ± SD\n(β)")
-    ) %>%
-    flextable::compose(
-      part  = "header", j = "recall",
-      value = as_paragraph("% Target\n(γ)")
-    ) %>%
-    flextable::compose(
-      part  = "header", j = "f1",
-      value = as_paragraph("F1-score\n(γ)")
-    ) %>%
+    flextable::compose(part = "header", j = "mntl",
+      value = as_paragraph("Mantel ", as_i("R"), "\n(β)")) %>%
+    flextable::compose(part = "header", j = "spearman",
+      value = as_paragraph("Spearman ", as_i("ρ"), "\n(α)")) %>%
+    flextable::compose(part = "header", j = "est",
+      value = as_paragraph("CCC\n(α)")) %>%
+    flextable::compose(part = "header", j = "bc",
+      value = as_paragraph("Bray-Curtis Dist ± SD\n(β)")) %>%
+    flextable::compose(part = "header", j = "recall",
+      value = as_paragraph("% Target\n(γ)")) %>%
+    flextable::compose(part = "header", j = "f1",
+      value = as_paragraph("F1-score\n(γ)")) %>%
     bold(part = "header") %>%
     bg(part = "header", bg = "#2C3E50") %>%
     color(part = "header", color = "white") %>%
@@ -115,52 +121,25 @@ make_bench_ft <- function(bench_table, prefix_ge = FALSE) {
     border_inner(part = "all", border = fp_border(color = "#DDDDDD", width = 0.5)) %>%
     fontsize(size = 10, part = "all") %>%
     font(fontname = "Calibri", part = "all") %>%
-    bg(part = "body", bg = "white") %>%        # white base for unshaded cells
+    bg(part = "body", bg = "white") %>%
     padding(padding.top = 6, padding.bottom = 6, part = "body") %>%
     line_spacing(space = 1.3, part = "all") %>%
     autofit()
 
-  # Higher = better: green shading
   for (col in value_cols_hi) {
     colors <- scale_col(bench_table[[col]])
     for (i in seq_along(colors)) ft <- bg(ft, i = i, j = col, bg = colors[i])
   }
-
-  # Lower = better: green shading reversed; colour against bc_mean but display as "bc"
   bc_colors <- scale_col(bench_table[["bc_mean"]], reverse = TRUE)
   for (i in seq_along(bc_colors)) ft <- bg(ft, i = i, j = "bc", bg = bc_colors[i])
 
   ft <- style_dataset_cells(ft, display_table$Dataset)
-
   ft
 }
 
-# ── Build the individual tables ───────────────────────────────────────────────
-ft_unfilt   <- make_bench_ft(bench_unfilt)
-ft_0001pct  <- make_bench_ft(bench_0001pct, prefix_ge = TRUE)
-ft_001pct   <- make_bench_ft(bench_001pct,  prefix_ge = TRUE)
-
-# ── Combine into one Word document ────────────────────────────────────────────
-doc <- read_docx() %>%
-  body_add_par("Table 1: Unfiltered", style = "heading 1") %>%
-  body_add_flextable(ft_unfilt) %>%
-  body_add_par("", style = "Normal") %>%
-  body_add_par("Table 2: Proportional filter (≥ 0.0001% of sample reads)",
-               style = "heading 1") %>%
-  body_add_flextable(ft_0001pct) %>%
-  body_add_par("", style = "Normal") %>%
-  body_add_par("Table 3: Proportional filter (≥ 0.001% of sample reads)",
-               style = "heading 1") %>%
-  body_add_flextable(ft_001pct)
-
-print(doc, target = "figs_tables/PHAUS_benchmark_comparison.docx")
-
-message("Saved: figs_tables/PHAUS_benchmark_comparison.docx")
-
-# ── Combined table builder ────────────────────────────────────────────────────
-# ranks = FALSE  → raw metric values with within-group green gradient
-# ranks = TRUE   → within-group ranks (1 = best) with darker green = rank 1
-make_combined_ft <- function(bench_unfilt, bench_0001pct, bench_001pct, ranks = FALSE, compact = FALSE) {
+# ── Combined table builder ─────────────────────────────────────────────────────
+make_combined_ft <- function(bench_unfilt, bench_0001pct, bench_001pct,
+                             ranks = FALSE, compact = FALSE) {
 
   bench_all <- dplyr::bind_rows(
     bench_unfilt  %>% mutate(Filter = "Unfiltered"),
@@ -175,13 +154,10 @@ make_combined_ft <- function(bench_unfilt, bench_0001pct, bench_001pct, ranks = 
   filter_runs   <- rle(as.character(bench_all$Filter))
   group_breaks  <- head(cumsum(filter_runs$lengths), -1)
 
-  # Replace metric values with within-group ranks when ranks = TRUE
-  # Higher-is-better cols: rank 1 = highest; bc_mean: rank 1 = lowest
   if (ranks) {
-    for (col in value_cols_hi) {
+    for (col in value_cols_hi)
       for (grp in group_indices)
         bench_all[[col]][grp] <- rank(-bench_all[[col]][grp], ties.method = "min")
-    }
     for (grp in group_indices)
       bench_all[["bc_mean"]][grp] <- rank(bench_all[["bc_mean"]][grp], ties.method = "min")
   }
@@ -189,17 +165,10 @@ make_combined_ft <- function(bench_unfilt, bench_0001pct, bench_001pct, ranks = 
   bench_all_display <- bench_all %>%
     mutate(
       Dataset   = recode(Dataset, "ILL" = "Illumina", "ONT" = "Nanopore"),
-      tot_reads = ifelse(Filter != "Unfiltered",
-                         paste0("≥", tot_reads),
-                         as.character(tot_reads)),
+      tot_reads = ifelse(Filter != "Unfiltered", paste0("≥", tot_reads), as.character(tot_reads)),
       n_reads   = paste0(round(n_reads / 1e6, 1), "M"),
       bc        = if (ranks) as.character(as.integer(bc_mean))
-                  else paste0(fmt_sig2(bc_mean), " ± ", fmt_sig2(bc_sd)),
-      est       = if (ranks) as.character(as.integer(est))      else fmt_sig2(est),
-      spearman  = if (ranks) as.character(as.integer(spearman)) else fmt_sig2(spearman),
-      mntl      = if (ranks) as.character(as.integer(mntl))     else fmt_sig2(mntl),
-      recall    = if (ranks) as.character(as.integer(recall))   else as.character(round(recall * 100)),
-      f1        = if (ranks) as.character(as.integer(f1))       else fmt_sig2(f1)
+                  else paste0(bc_mean, " ± ", bc_sd)
     ) %>%
     select(Filter, Software, Dataset, tot_reads, replicates, n_reads,
            est, spearman, mntl, bc, recall, f1)
@@ -219,30 +188,18 @@ make_combined_ft <- function(bench_unfilt, bench_0001pct, bench_001pct, ranks = 
       recall     = "% Target\n(γ)",
       f1         = "F1-score\n(γ)"
     ) %>%
-    flextable::compose(
-      part  = "header", j = "mntl",
-      value = as_paragraph("Mantel ", as_i("R"), "\n(β)")
-    ) %>%
-    flextable::compose(
-      part  = "header", j = "spearman",
-      value = as_paragraph("Spearman ", as_i("ρ"), "\n(α)")
-    ) %>%
-    flextable::compose(
-      part  = "header", j = "est",
-      value = as_paragraph("CCC\n(α)")
-    ) %>%
-    flextable::compose(
-      part  = "header", j = "bc",
-      value = if (ranks) as_paragraph("BC Dist\n(β)") else as_paragraph("BC Dist ± SD\n(β)")
-    ) %>%
-    flextable::compose(
-      part  = "header", j = "recall",
-      value = as_paragraph("% Target\n(γ)")
-    ) %>%
-    flextable::compose(
-      part  = "header", j = "f1",
-      value = as_paragraph("F1-score\n(γ)")
-    ) %>%
+    flextable::compose(part = "header", j = "mntl",
+      value = as_paragraph("Mantel ", as_i("R"), "\n(β)")) %>%
+    flextable::compose(part = "header", j = "spearman",
+      value = as_paragraph("Spearman ", as_i("ρ"), "\n(α)")) %>%
+    flextable::compose(part = "header", j = "est",
+      value = as_paragraph("CCC\n(α)")) %>%
+    flextable::compose(part = "header", j = "bc",
+      value = if (ranks) as_paragraph("BC Dist\n(β)") else as_paragraph("BC Dist ± SD\n(β)")) %>%
+    flextable::compose(part = "header", j = "recall",
+      value = as_paragraph("% Target\n(γ)")) %>%
+    flextable::compose(part = "header", j = "f1",
+      value = as_paragraph("F1-score\n(γ)")) %>%
     merge_v(j = "Filter") %>%
     bold(part = "header") %>%
     bg(part = "header", bg = "#2C3E50") %>%
@@ -258,8 +215,7 @@ make_combined_ft <- function(bench_unfilt, bench_0001pct, bench_001pct, ranks = 
     border_inner_v(part = "all", border = fp_border(color = "#DDDDDD", width = 0.5)) %>%
     vline(j = "Filter", border = fp_border(color = "#2C3E50", width = 1.2), part = "body") %>%
     vline(j = "Filter", border = fp_border(color = "#2C3E50", width = 1.2), part = "header") %>%
-    hline(i = group_breaks,
-          border = fp_border(color = "#2C3E50", width = 1.8)) %>%
+    hline(i = group_breaks, border = fp_border(color = "#2C3E50", width = 1.8)) %>%
     padding(i = group_breaks,     padding.bottom = if (compact) 5 else 9, part = "body") %>%
     padding(i = group_breaks + 1, padding.top    = if (compact) 5 else 9, part = "body") %>%
     padding(padding = if (compact) 3 else 8, part = "all") %>%
@@ -271,8 +227,6 @@ make_combined_ft <- function(bench_unfilt, bench_0001pct, bench_001pct, ranks = 
     autofit() %>%
     flextable::width(j = "Filter", width = if (compact) 1.2 else 1.5)
 
-  # Colour scaling: ranks mode → all reverse=TRUE (rank 1 = darkest green)
-  #                 raw mode   → higher-is-better normal, bc reversed
   for (col in value_cols_hi) {
     for (grp in group_indices) {
       cell_colors <- scale_col(bench_all[[col]][grp], reverse = ranks)
@@ -295,64 +249,7 @@ make_combined_ft <- function(bench_unfilt, bench_0001pct, bench_001pct, ranks = 
   ft
 }
 
-# ── All-records ground truth (main table: unfilt / 0.0001% / 0.001%) ─────────
-ft_all         <- make_combined_ft(bench_unfilt, bench_0001pct, bench_001pct)
-ft_all_compact <- make_combined_ft(bench_unfilt, bench_0001pct, bench_001pct, compact = TRUE)
-
-doc_all <- read_docx() %>%
-  body_set_default_section(
-    prop_section(
-      page_size    = page_size(orient = "landscape"),
-      page_margins = page_mar(top = 0.4, bottom = 0.4, left = 0.4, right = 0.4, gutter = 0)
-    )
-  ) %>%
-  body_add_par("Benchmark comparison: all filter strategies",
-               style = "heading 1") %>%
-  body_add_flextable(ft_all_compact)
-
-print(doc_all, target = "figs_tables/PHAUS_benchmark_combined.docx")
-message("Saved: figs_tables/PHAUS_benchmark_combined.docx")
-
-save_as_image(ft_all, path = "figs_tables/PHAUS_benchmark_combined.png", zoom = 3, expand = 10)
-message("Saved: figs_tables/PHAUS_benchmark_combined.png")
-
-# ── Parent-only ground truth ──────────────────────────────────────────────────
-ft_all_parent         <- make_combined_ft(bench_unfilt_parent, bench_0001pct_parent, bench_001pct_parent)
-ft_all_parent_compact <- make_combined_ft(bench_unfilt_parent, bench_0001pct_parent, bench_001pct_parent, compact = TRUE)
-
-save_as_image(ft_all_parent, path = "figs_tables/PHAUS_benchmark_combined_TARGET_ONLY.png", zoom = 3, expand = 10)
-message("Saved: figs_tables/PHAUS_benchmark_combined_TARGET_ONLY.png")
-
-doc_parent <- read_docx() %>%
-  body_set_default_section(
-    prop_section(
-      page_size    = page_size(orient = "landscape"),
-      page_margins = page_mar(top = 0.4, bottom = 0.4, left = 0.4, right = 0.4, gutter = 0)
-    )
-  ) %>%
-  body_add_par("Benchmark comparison: target BINs only — all filter strategies",
-               style = "heading 1") %>%
-  body_add_flextable(ft_all_parent_compact)
-print(doc_parent, target = "figs_tables/PHAUS_benchmark_combined_TARGET_ONLY.docx")
-message("Saved: figs_tables/PHAUS_benchmark_combined_TARGET_ONLY.docx")
-
-# ── Ranked versions ───────────────────────────────────────────────────────────
-ft_all_ranks <- make_combined_ft(bench_unfilt, bench_0001pct, bench_001pct, ranks = TRUE)
-
-save_as_image(ft_all_ranks, path = "figs_tables/PHAUS_benchmark_combined_RANKS.png", zoom = 3, expand = 10)
-message("Saved: figs_tables/PHAUS_benchmark_combined_RANKS.png")
-
-ft_all_parent_ranks <- make_combined_ft(bench_unfilt_parent, bench_0001pct_parent, bench_001pct_parent, ranks = TRUE)
-
-save_as_image(ft_all_parent_ranks, path = "figs_tables/PHAUS_benchmark_combined_TARGET_ONLY_RANKS.png", zoom = 3, expand = 10)
-message("Saved: figs_tables/PHAUS_benchmark_combined_TARGET_ONLY_RANKS.png")
-
-# ── Illumina-only composite-rank summary ─────────────────────────────────────
-# For each filter strategy and method:
-#   α rank  = mean rank of CCC and Spearman ρ  (higher-is-better metrics)
-#   β rank  = mean rank of Mantel R and Bray-Curtis distance
-#   γ rank  = mean rank of % Target recall and F1-score
-#   Overall = rank of mean(α, β, γ) within the filter group
+# ── Illumina composite-rank summary ───────────────────────────────────────────
 make_illumina_ranks_ft <- function(bench_unfilt, bench_0001pct, bench_001pct) {
 
   bench_all <- dplyr::bind_rows(
@@ -367,14 +264,12 @@ make_illumina_ranks_ft <- function(bench_unfilt, bench_0001pct, bench_001pct) {
   filter_runs   <- rle(as.character(bench_all$Filter))
   group_breaks  <- head(cumsum(filter_runs$lengths), -1)
 
-  # Step 1: within-group metric ranks (1 = best)
   for (col in c("est", "spearman", "mntl", "recall", "f1"))
     for (grp in group_indices)
       bench_all[[col]][grp] <- rank(-bench_all[[col]][grp], ties.method = "min")
   for (grp in group_indices)
     bench_all[["bc_mean"]][grp] <- rank(bench_all[["bc_mean"]][grp], ties.method = "min")
 
-  # Step 2: composite mean rank per diversity level
   bench_all <- bench_all %>%
     mutate(
       alpha_rank    = (est + spearman) / 2,
@@ -383,7 +278,6 @@ make_illumina_ranks_ft <- function(bench_unfilt, bench_0001pct, bench_001pct) {
       overall_score = (alpha_rank + beta_rank + gamma_rank) / 3
     )
 
-  # Step 3: overall rank within each filter group (lower composite score = rank 1)
   bench_all$overall_rank <- NA_real_
   for (grp in group_indices)
     bench_all[["overall_rank"]][grp] <- rank(bench_all[["overall_score"]][grp], ties.method = "min")
@@ -406,18 +300,12 @@ make_illumina_ranks_ft <- function(bench_unfilt, bench_0001pct, bench_001pct) {
       gamma_rank   = "g:\nmean rank",
       overall_rank = "Overall\nRank"
     ) %>%
-    flextable::compose(
-      part = "header", j = "alpha_rank",
-      value = as_paragraph("α:\nmean rank")
-    ) %>%
-    flextable::compose(
-      part = "header", j = "beta_rank",
-      value = as_paragraph("β:\nmean rank")
-    ) %>%
-    flextable::compose(
-      part = "header", j = "gamma_rank",
-      value = as_paragraph("γ:\nmean rank")
-    ) %>%
+    flextable::compose(part = "header", j = "alpha_rank",
+      value = as_paragraph("α:\nmean rank")) %>%
+    flextable::compose(part = "header", j = "beta_rank",
+      value = as_paragraph("β:\nmean rank")) %>%
+    flextable::compose(part = "header", j = "gamma_rank",
+      value = as_paragraph("γ:\nmean rank")) %>%
     merge_v(j = "Filter") %>%
     bold(part = "header") %>%
     bg(part = "header", bg = "#2C3E50") %>%
@@ -433,8 +321,7 @@ make_illumina_ranks_ft <- function(bench_unfilt, bench_0001pct, bench_001pct) {
     border_inner_v(part = "all", border = fp_border(color = "#DDDDDD", width = 0.5)) %>%
     vline(j = "Filter", border = fp_border(color = "#2C3E50", width = 1.2), part = "body") %>%
     vline(j = "Filter", border = fp_border(color = "#2C3E50", width = 1.2), part = "header") %>%
-    hline(i = group_breaks,
-          border = fp_border(color = "#2C3E50", width = 1.8)) %>%
+    hline(i = group_breaks, border = fp_border(color = "#2C3E50", width = 1.8)) %>%
     padding(i = group_breaks,     padding.bottom = 9, part = "body") %>%
     padding(i = group_breaks + 1, padding.top    = 9, part = "body") %>%
     padding(padding = 8, part = "all") %>%
@@ -454,7 +341,6 @@ make_illumina_ranks_ft <- function(bench_unfilt, bench_0001pct, bench_001pct) {
     autofit() %>%
     flextable::width(j = "Filter", width = 1.5)
 
-  # Color: lower value = better for all rank columns → reverse = TRUE
   for (col in c("alpha_rank", "beta_rank", "gamma_rank", "overall_rank")) {
     for (grp in group_indices) {
       cell_colors <- scale_col(bench_all[[col]][grp], reverse = TRUE)
@@ -465,10 +351,68 @@ make_illumina_ranks_ft <- function(bench_unfilt, bench_0001pct, bench_001pct) {
   ft
 }
 
-ft_paul <- make_illumina_ranks_ft(bench_unfilt, bench_0001pct, bench_001pct)
+# ── Build and save all outputs ─────────────────────────────────────────────────
+message("Building tables...")
 
-save_as_image(ft_paul, path = "figs_tables/Ranks_Fig_For_Paul.png", zoom = 3, expand = 10)
-message("Saved: figs_tables/Ranks_Fig_For_Paul.png")
+ft_unfilt  <- make_bench_ft(bench_unfilt)
+ft_0001pct <- make_bench_ft(bench_0001pct, prefix_ge = TRUE)
+ft_001pct  <- make_bench_ft(bench_001pct,  prefix_ge = TRUE)
+
+doc <- read_docx() %>%
+  body_add_par("Table 1: Unfiltered", style = "heading 1") %>%
+  body_add_flextable(ft_unfilt) %>%
+  body_add_par("", style = "Normal") %>%
+  body_add_par("Table 2: Proportional filter (≥ 0.0001% of sample reads)", style = "heading 1") %>%
+  body_add_flextable(ft_0001pct) %>%
+  body_add_par("", style = "Normal") %>%
+  body_add_par("Table 3: Proportional filter (≥ 0.001% of sample reads)", style = "heading 1") %>%
+  body_add_flextable(ft_001pct)
+print(doc, target = file.path(output_dir, "PHAUS_benchmark_comparison.docx"))
+message("Saved: PHAUS_benchmark_comparison.docx")
+
+ft_all         <- make_combined_ft(bench_unfilt, bench_0001pct, bench_001pct)
+ft_all_compact <- make_combined_ft(bench_unfilt, bench_0001pct, bench_001pct, compact = TRUE)
+
+doc_all <- read_docx() %>%
+  body_set_default_section(prop_section(
+    page_size    = page_size(orient = "landscape"),
+    page_margins = page_mar(top = 0.4, bottom = 0.4, left = 0.4, right = 0.4, gutter = 0)
+  )) %>%
+  body_add_par("Benchmark comparison: all filter strategies", style = "heading 1") %>%
+  body_add_flextable(ft_all_compact)
+print(doc_all, target = file.path(output_dir, "PHAUS_benchmark_combined.docx"))
+message("Saved: PHAUS_benchmark_combined.docx")
+
+save_as_image(ft_all, path = file.path(output_dir, "PHAUS_benchmark_combined.png"), zoom = 3, expand = 10)
+message("Saved: PHAUS_benchmark_combined.png")
+
+ft_all_parent         <- make_combined_ft(bench_unfilt_parent, bench_0001pct_parent, bench_001pct_parent)
+ft_all_parent_compact <- make_combined_ft(bench_unfilt_parent, bench_0001pct_parent, bench_001pct_parent, compact = TRUE)
+
+save_as_image(ft_all_parent, path = file.path(output_dir, "PHAUS_benchmark_combined_TARGET_ONLY.png"), zoom = 3, expand = 10)
+message("Saved: PHAUS_benchmark_combined_TARGET_ONLY.png")
+
+doc_parent <- read_docx() %>%
+  body_set_default_section(prop_section(
+    page_size    = page_size(orient = "landscape"),
+    page_margins = page_mar(top = 0.4, bottom = 0.4, left = 0.4, right = 0.4, gutter = 0)
+  )) %>%
+  body_add_par("Benchmark comparison: target BINs only — all filter strategies", style = "heading 1") %>%
+  body_add_flextable(ft_all_parent_compact)
+print(doc_parent, target = file.path(output_dir, "PHAUS_benchmark_combined_TARGET_ONLY.docx"))
+message("Saved: PHAUS_benchmark_combined_TARGET_ONLY.docx")
+
+ft_all_ranks <- make_combined_ft(bench_unfilt, bench_0001pct, bench_001pct, ranks = TRUE)
+save_as_image(ft_all_ranks, path = file.path(output_dir, "PHAUS_benchmark_combined_RANKS.png"), zoom = 3, expand = 10)
+message("Saved: PHAUS_benchmark_combined_RANKS.png")
+
+ft_all_parent_ranks <- make_combined_ft(bench_unfilt_parent, bench_0001pct_parent, bench_001pct_parent, ranks = TRUE)
+save_as_image(ft_all_parent_ranks, path = file.path(output_dir, "PHAUS_benchmark_combined_TARGET_ONLY_RANKS.png"), zoom = 3, expand = 10)
+message("Saved: PHAUS_benchmark_combined_TARGET_ONLY_RANKS.png")
+
+ft_paul <- make_illumina_ranks_ft(bench_unfilt, bench_0001pct, bench_001pct)
+save_as_image(ft_paul, path = file.path(output_dir, "Ranks_Fig_For_Paul.png"), zoom = 3, expand = 10)
+message("Saved: Ranks_Fig_For_Paul.png")
 
 ft_paul_compact <- ft_paul %>%
   padding(padding.top = 3, padding.bottom = 3, part = "body") %>%
@@ -484,6 +428,7 @@ doc_paul <- read_docx() %>%
     page_margins = page_mar(top = 0.4, bottom = 0.4, left = 0.4, right = 0.4, gutter = 0)
   )) %>%
   body_add_flextable(ft_paul_compact)
+print(doc_paul, target = file.path(output_dir, "Ranks_Fig_For_Paul.docx"))
+message("Saved: Ranks_Fig_For_Paul.docx")
 
-print(doc_paul, target = "figs_tables/Ranks_Fig_For_Paul.docx")
-message("Saved: figs_tables/Ranks_Fig_For_Paul.docx")
+message("\nDone. All outputs written to: ", output_dir)
